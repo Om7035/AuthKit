@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: authkit_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authkit
+      POSTGRES_USER: authkit_user
+      POSTGRES_PASSWORD: authkit_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authkit_user -d authkit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # AuthKit API Server
+  api:
+    build: 
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: authkit_api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: authkit
+      DB_USER: authkit_user
+      DB_PASSWORD: authkit_password
+      
+      # JWT Configuration
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_REFRESH_SECRET: your-super-secret-refresh-key-change-in-production
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      
+      # Server Configuration
+      NODE_ENV: development
+      PORT: 3000
+      
+      # ⚠️  WARNING: FOR DEMO ONLY - NEVER USE IN PRODUCTION ⚠️
+      # These are hardcoded demo credentials for development/testing
+      # Replace with real Google OAuth credentials in production
+      GOOGLE_CLIENT_ID: AUTHKIT_DEMO_CLIENT_ID
+      GOOGLE_CLIENT_SECRET: AUTHKIT_DEMO_SECRET
+      GOOGLE_REDIRECT_URI: http://localhost:3000/api/auth/google/callback
+      
+      # CORS Configuration
+      CORS_ORIGIN: http://localhost:3001
+      
+      # Rate Limiting
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: authkit_network
