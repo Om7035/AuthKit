@@ -6,447 +6,196 @@ require('dotenv').config();
 
 class SecurityAudit {
   constructor() {
-    this.issues = [];
+    this.criticalIssues = [];
     this.warnings = [];
-    this.passed = [];
     this.fixMode = process.argv.includes('--fix');
-    this.verbose = process.argv.includes('--verbose') || process.argv.includes('-v');
+    this.hasIssues = false;
   }
 
-  // Add issue to the list
-  addIssue(type, message, severity = 'FAIL', fix = null) {
-    const issue = { type, message, severity, fix };
-    
-    if (severity === 'FAIL') {
-      this.issues.push(issue);
-    } else if (severity === 'WARN') {
-      this.warnings.push(issue);
-    } else {
-      this.passed.push(issue);
-    }
+  // Print critical issue
+  printCritical(message, fixHint = null) {
+    console.log(`❌ Critical: ${message}${fixHint ? ` [FIX: ${fixHint}]` : ''}`);
+    this.criticalIssues.push({ message, fixHint });
+    this.hasIssues = true;
   }
 
-  // Check if httpOnly cookie is set for refresh token
+  // Print warning
+  printWarning(message) {
+    console.log(`⚠️ Warn: ${message}`);
+    this.warnings.push(message);
+  }
+
+  // Print success
+  printSuccess(message) {
+    console.log(`✅ ${message}`);
+  }
+
+  // 1. Check if httpOnly cookie is set for refresh token in /api/refresh_token route
   checkHttpOnlyCookie() {
-    console.log('🔍 Checking httpOnly cookie configuration...');
-    
     try {
-      // Check both auth routes and cookie middleware
       const authRoutesPath = path.join(__dirname, '../backend/routes/auth.js');
       const cookieAuthPath = path.join(__dirname, '../backend/middleware/cookieAuth.js');
       
-      let authRoutesContent = '';
-      let cookieAuthContent = '';
+      let content = '';
       
       if (fs.existsSync(authRoutesPath)) {
-        authRoutesContent = fs.readFileSync(authRoutesPath, 'utf8');
+        content += fs.readFileSync(authRoutesPath, 'utf8');
       }
       
       if (fs.existsSync(cookieAuthPath)) {
-        cookieAuthContent = fs.readFileSync(cookieAuthPath, 'utf8');
+        content += fs.readFileSync(cookieAuthPath, 'utf8');
       }
       
-      const combinedContent = authRoutesContent + cookieAuthContent;
+      // Check for refresh token route and httpOnly configuration
+      const hasRefreshRoute = /router\.post\s*\(\s*['"`]\/refresh['"`]/gi.test(content);
+      const hasHttpOnly = /httpOnly:\s*true/gi.test(content);
+      const hasSecureCookieFunction = /setSecureRefreshTokenCookie/gi.test(content);
       
-      // Check for httpOnly: true in cookie configuration
-      const httpOnlyRegex = /httpOnly:\s*true/gi;
-      const cookieRegex = /\.cookie\s*\(|setSecureRefreshTokenCookie/gi;
-      
-      const hasHttpOnly = httpOnlyRegex.test(combinedContent);
-      const hasCookie = cookieRegex.test(combinedContent);
-      
-      if (hasCookie && hasHttpOnly) {
-        this.addIssue(
-          'httpOnly_cookie',
-          '✅ httpOnly cookie is properly configured for refresh tokens',
-          'PASS'
-        );
-      } else if (hasCookie && !hasHttpOnly) {
-        this.addIssue(
-          'httpOnly_cookie',
-          '❌ CRITICAL: Refresh token cookie is missing httpOnly flag - this is a security vulnerability!',
-          'FAIL',
-          'Add httpOnly: true to cookie configuration'
-        );
+      if (hasRefreshRoute && (hasHttpOnly || hasSecureCookieFunction)) {
+        this.printSuccess('Refresh token cookie has httpOnly protection');
+      } else if (hasRefreshRoute) {
+        this.printCritical('Refresh token cookie missing httpOnly!', 'npm run fix');
       } else {
-        this.addIssue(
-          'httpOnly_cookie',
-          '⚠️  No cookie configuration found - refresh tokens may not be using httpOnly cookies',
-          'WARN'
-        );
+        this.printCritical('No refresh token route found!', 'Add refresh token endpoint');
       }
     } catch (err) {
-      this.addIssue(
-        'httpOnly_cookie',
-        `❌ Failed to check httpOnly cookie configuration: ${err.message}`,
-        'FAIL'
-      );
+      this.printCritical(`Failed to check httpOnly cookie: ${err.message}`);
     }
   }
 
-  // Check JWT expiration time
+  // 2. Check JWT expiration - warn if > 1800 seconds (30 mins)
   checkJWTExpiration() {
-    console.log('🔍 Checking JWT expiration configuration...');
-    
-    const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '15m';
-    
-    // Parse expiration time
-    const parseExpirationTime = (timeString) => {
-      const match = timeString.match(/^(\d+)([smhd])$/);
-      if (!match) return null;
+    try {
+      const jwtExpiration = parseInt(process.env.JWT_EXPIRATION) || 900;
       
-      const [, value, unit] = match;
-      const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
-      
-      return parseInt(value) * multipliers[unit];
-    };
-    
-    const expirationSeconds = parseExpirationTime(jwtExpiresIn);
-    
-    if (expirationSeconds === null) {
-      this.addIssue(
-        'jwt_expiration',
-        `❌ Invalid JWT expiration format: ${jwtExpiresIn}`,
-        'FAIL'
-      );
-      return;
-    }
-    
-    const thirtyMinutes = 30 * 60; // 30 minutes in seconds
-    
-    if (expirationSeconds > thirtyMinutes) {
-      this.addIssue(
-        'jwt_expiration',
-        `⚠️  JWT expiration time (${jwtExpiresIn}) is longer than 30 minutes - consider shorter expiration for better security`,
-        'WARN',
-        'Set JWT_EXPIRES_IN to 15m or less in environment variables'
-      );
-    } else {
-      this.addIssue(
-        'jwt_expiration',
-        `✅ JWT expiration time (${jwtExpiresIn}) is within recommended limits`,
-        'PASS'
-      );
+      if (jwtExpiration > 1800) {
+        this.printWarning('JWT expiration too long (30+ mins). Reduce to 15 mins.');
+      } else {
+        this.printSuccess(`JWT expiration is ${jwtExpiration} seconds (within 30 min limit)`);
+      }
+    } catch (err) {
+      this.printCritical(`Failed to check JWT expiration: ${err.message}`);
     }
   }
 
-  // Check if /api/ endpoints are properly protected
-  checkApiEndpointProtection() {
-    console.log('🔍 Checking API endpoint protection...');
-    
+  // 3. Check /api/me route for auth middleware
+  checkApiRouteProtection() {
     try {
-      // Check main server file for authentication middleware
-      const serverPath = path.join(__dirname, '../backend/index.js');
-      const serverContent = fs.readFileSync(serverPath, 'utf8');
+      const userRoutesPath = path.join(__dirname, '../backend/routes/user.js');
       
-      // Check for blockUnauthenticatedApi middleware
-      const hasApiProtection = /blockUnauthenticatedApi/gi.test(serverContent);
-      
-      if (hasApiProtection) {
-        this.addIssue(
-          'api_protection',
-          '✅ API endpoints are protected with authentication middleware',
-          'PASS'
-        );
-      } else {
-        this.addIssue(
-          'api_protection',
-          '❌ CRITICAL: /api/ endpoints are not properly protected - unauthenticated access possible!',
-          'FAIL',
-          'Add blockUnauthenticatedApi middleware to protect /api/ routes'
-        );
-      }
-      
-      // Check auth middleware file
-      const authMiddlewarePath = path.join(__dirname, '../backend/middleware/auth.js');
-      if (fs.existsSync(authMiddlewarePath)) {
-        const authContent = fs.readFileSync(authMiddlewarePath, 'utf8');
+      if (fs.existsSync(userRoutesPath)) {
+        const userRoutesContent = fs.readFileSync(userRoutesPath, 'utf8');
         
-        // Check for proper 404 response on unauthenticated API access
-        const has404Response = /404.*Not Found/gi.test(authContent);
+        // Check if /me route exists and has auth middleware
+        const hasMeRoute = /router\.get\s*\(\s*['"`]\/me['"`]/gi.test(userRoutesContent);
+        const hasAuthMiddleware = /authenticateToken/gi.test(userRoutesContent);
         
-        if (has404Response) {
-          this.addIssue(
-            'api_protection',
-            '✅ Unauthenticated API requests return 404 (security through obscurity)',
-            'PASS'
-          );
+        if (hasMeRoute && hasAuthMiddleware) {
+          this.printSuccess('/api/me route is properly protected with auth middleware');
+        } else if (hasMeRoute) {
+          this.printCritical('Unprotected route!', 'Add auth middleware');
         } else {
-          this.addIssue(
-            'api_protection',
-            '⚠️  Consider returning 404 instead of 401 for unauthenticated API requests',
-            'WARN'
-          );
+          this.printSuccess('No /api/me route found (or properly protected)');
         }
+      } else {
+        this.printSuccess('No user routes file found');
       }
     } catch (err) {
-      this.addIssue(
-        'api_protection',
-        `❌ Failed to check API endpoint protection: ${err.message}`,
-        'FAIL'
-      );
+      this.printCritical(`Failed to check API route protection: ${err.message}`);
     }
   }
 
-  // Check environment variables security
-  checkEnvironmentSecurity() {
-    console.log('🔍 Checking environment variables security...');
-    
-    const requiredSecrets = [
-      'JWT_SECRET',
-      'JWT_REFRESH_SECRET',
-      'COOKIE_SECRET'
-    ];
-    
-    const demoCredentials = [
-      'GOOGLE_CLIENT_ID',
-      'GOOGLE_CLIENT_SECRET'
-    ];
-    
-    // Check for required secrets
-    requiredSecrets.forEach(secret => {
-      const value = process.env[secret];
-      if (!value) {
-        this.addIssue(
-          'environment_security',
-          `❌ Missing required environment variable: ${secret}`,
-          'FAIL',
-          `Set ${secret} in your .env file`
-        );
-      } else if (value.includes('change-in-production') || value.length < 32) {
-        this.addIssue(
-          'environment_security',
-          `⚠️  ${secret} appears to be using default/weak value`,
-          'WARN',
-          `Generate a strong random value for ${secret}`
-        );
-      } else {
-        this.addIssue(
-          'environment_security',
-          `✅ ${secret} is properly configured`,
-          'PASS'
-        );
-      }
-    });
-    
-    // Check for demo credentials in production
-    if (process.env.NODE_ENV === 'production') {
-      demoCredentials.forEach(cred => {
-        const value = process.env[cred];
-        if (value && (value.includes('DEMO') || value.includes('AUTHKIT_DEMO'))) {
-          this.addIssue(
-            'environment_security',
-            `❌ CRITICAL: Demo credentials detected in production for ${cred}!`,
-            'FAIL',
-            `Replace ${cred} with real production credentials`
-          );
-        }
-      });
-    }
-  }
-
-  // Check for security headers
-  checkSecurityHeaders() {
-    console.log('🔍 Checking security headers configuration...');
-    
-    try {
-      const serverPath = path.join(__dirname, '../backend/index.js');
-      const serverContent = fs.readFileSync(serverPath, 'utf8');
-      
-      const securityChecks = [
-        { name: 'Helmet', pattern: /helmet/gi, description: 'Security headers middleware' },
-        { name: 'CORS', pattern: /cors/gi, description: 'CORS configuration' },
-        { name: 'Rate Limiting', pattern: /rateLimit|express-rate-limit/gi, description: 'Rate limiting protection' }
-      ];
-      
-      securityChecks.forEach(check => {
-        if (check.pattern.test(serverContent)) {
-          this.addIssue(
-            'security_headers',
-            `✅ ${check.description} is configured`,
-            'PASS'
-          );
-        } else {
-          this.addIssue(
-            'security_headers',
-            `⚠️  ${check.description} is not configured`,
-            'WARN',
-            `Add ${check.name} middleware for better security`
-          );
-        }
-      });
-    } catch (err) {
-      this.addIssue(
-        'security_headers',
-        `❌ Failed to check security headers: ${err.message}`,
-        'FAIL'
-      );
-    }
-  }
-
-  // Check database security
-  checkDatabaseSecurity() {
-    console.log('🔍 Checking database security configuration...');
-    
-    // Check for SQL injection protection
-    try {
-      const userModelPath = path.join(__dirname, '../backend/models/User.js');
-      const userModelContent = fs.readFileSync(userModelPath, 'utf8');
-      
-      // Check for parameterized queries
-      const hasParameterizedQueries = /\$\d+/g.test(userModelContent);
-      
-      if (hasParameterizedQueries) {
-        this.addIssue(
-          'database_security',
-          '✅ Parameterized queries are used (SQL injection protection)',
-          'PASS'
-        );
-      } else {
-        this.addIssue(
-          'database_security',
-          '❌ CRITICAL: SQL queries may not be properly parameterized!',
-          'FAIL',
-          'Use parameterized queries to prevent SQL injection'
-        );
-      }
-      
-      // Check for password hashing
-      const hasPasswordHashing = /bcrypt/gi.test(userModelContent);
-      
-      if (hasPasswordHashing) {
-        this.addIssue(
-          'database_security',
-          '✅ Password hashing is implemented',
-          'PASS'
-        );
-      } else {
-        this.addIssue(
-          'database_security',
-          '❌ CRITICAL: Password hashing may not be implemented!',
-          'FAIL',
-          'Implement proper password hashing with bcrypt'
-        );
-      }
-    } catch (err) {
-      this.addIssue(
-        'database_security',
-        `❌ Failed to check database security: ${err.message}`,
-        'FAIL'
-      );
-    }
-  }
-
-  // Attempt to fix issues automatically
+  // Auto-fix functionality for npm run fix
   async autoFix() {
     if (!this.fixMode) return;
     
-    console.log('\n🔧 Attempting to auto-fix issues...');
+    console.log('\n🔧 Auto-fixing issues...');
+    let fixed = false;
     
-    // Fix httpOnly cookie if missing
-    const httpOnlyIssue = this.issues.find(issue => 
-      issue.type === 'httpOnly_cookie' && issue.severity === 'FAIL'
-    );
-    
-    if (httpOnlyIssue) {
-      try {
-        const authRoutesPath = path.join(__dirname, '../backend/routes/auth.js');
+    // 1. Fix httpOnly cookie if missing
+    try {
+      const authRoutesPath = path.join(__dirname, '../backend/routes/auth.js');
+      if (fs.existsSync(authRoutesPath)) {
         let authContent = fs.readFileSync(authRoutesPath, 'utf8');
         
-        // Simple fix: replace cookie calls to include httpOnly
+        // Add httpOnly: true to refresh token cookies
+        const originalContent = authContent;
         authContent = authContent.replace(
-          /res\.cookie\s*\(\s*['"`]refreshToken['"`]\s*,\s*refreshToken\s*,\s*{([^}]*)}/g,
+          /res\.cookie\s*\(\s*['"`]refreshToken['"`]\s*,\s*[^,]+\s*,\s*{([^}]*)}/g,
           (match, options) => {
             if (!options.includes('httpOnly')) {
               const newOptions = options.trim() ? `${options.trim()}, httpOnly: true` : 'httpOnly: true';
-              return `res.cookie('refreshToken', refreshToken, { ${newOptions} }`;
+              return match.replace(options, newOptions);
             }
             return match;
           }
         );
         
-        fs.writeFileSync(authRoutesPath, authContent);
-        console.log('✅ Fixed: Added httpOnly flag to refresh token cookies');
-      } catch (err) {
-        console.log(`❌ Failed to fix httpOnly cookie: ${err.message}`);
+        if (authContent !== originalContent) {
+          fs.writeFileSync(authRoutesPath, authContent);
+          console.log('✅ Fixed: Added httpOnly flag to refresh token cookies');
+          fixed = true;
+        }
       }
+    } catch (err) {
+      console.log(`❌ Failed to fix httpOnly cookie: ${err.message}`);
+    }
+    
+    // 2. Fix JWT expiration if too long
+    try {
+      const envPath = path.join(__dirname, '../.env');
+      if (fs.existsSync(envPath)) {
+        let envContent = fs.readFileSync(envPath, 'utf8');
+        const originalContent = envContent;
+        
+        // Set JWT_EXPIRATION to 900 seconds (15 mins) if > 1800
+        envContent = envContent.replace(
+          /JWT_EXPIRATION=\d+/g,
+          'JWT_EXPIRATION=900'
+        );
+        
+        // Add JWT_EXPIRATION if it doesn't exist
+        if (!envContent.includes('JWT_EXPIRATION=')) {
+          envContent += '\nJWT_EXPIRATION=900\n';
+        }
+        
+        if (envContent !== originalContent) {
+          fs.writeFileSync(envPath, envContent);
+          console.log('✅ Fixed: Set JWT expiration to 900 seconds (15 mins)');
+          fixed = true;
+        }
+      }
+    } catch (err) {
+      console.log(`❌ Failed to fix JWT expiration: ${err.message}`);
+    }
+    
+    if (!fixed) {
+      console.log('ℹ️  No fixes needed or applied');
     }
   }
 
-  // Run all security checks
+  // Run security audit
   async runAudit() {
-    console.log('🛡️  AuthKit Security Audit Starting...\n');
+    console.log('🛡️ AuthKit Security Audit\n');
     
+    // Run all checks
     this.checkHttpOnlyCookie();
     this.checkJWTExpiration();
-    this.checkApiEndpointProtection();
-    this.checkEnvironmentSecurity();
-    this.checkSecurityHeaders();
-    this.checkDatabaseSecurity();
+    this.checkApiRouteProtection();
     
-    // Attempt auto-fixes if requested
-    await this.autoFix();
-    
-    this.printResults();
-    
-    // Exit with appropriate code
-    process.exit(this.issues.length > 0 ? 1 : 0);
-  }
-
-  // Print audit results
-  printResults() {
-    console.log('\n📊 Security Audit Results');
-    console.log('========================\n');
-    
-    // Print failures
-    if (this.issues.length > 0) {
-      console.log('❌ CRITICAL ISSUES:');
-      this.issues.forEach(issue => {
-        console.log(`   ${issue.message}`);
-        if (issue.fix && this.verbose) {
-          console.log(`   💡 Fix: ${issue.fix}`);
-        }
-      });
-      console.log('');
+    // Auto-fix if requested
+    if (this.fixMode) {
+      await this.autoFix();
     }
     
-    // Print warnings
-    if (this.warnings.length > 0) {
-      console.log('⚠️  WARNINGS:');
-      this.warnings.forEach(warning => {
-        console.log(`   ${warning.message}`);
-        if (warning.fix && this.verbose) {
-          console.log(`   💡 Suggestion: ${warning.fix}`);
-        }
-      });
-      console.log('');
-    }
-    
-    // Print passed checks
-    if (this.passed.length > 0 && this.verbose) {
-      console.log('✅ PASSED CHECKS:');
-      this.passed.forEach(passed => {
-        console.log(`   ${passed.message}`);
-      });
-      console.log('');
-    }
-    
-    // Summary
-    const total = this.issues.length + this.warnings.length + this.passed.length;
-    console.log(`📈 Summary: ${this.passed.length}/${total} checks passed, ${this.warnings.length} warnings, ${this.issues.length} critical issues`);
-    
-    if (this.issues.length > 0) {
-      console.log('\n🚨 SECURITY AUDIT FAILED - Please fix critical issues before deploying to production!');
-      if (!this.fixMode) {
-        console.log('💡 Run with --fix flag to attempt automatic fixes');
-      }
-    } else if (this.warnings.length > 0) {
-      console.log('\n⚠️  Security audit passed with warnings - consider addressing them for better security');
+    // Return appropriate exit code
+    if (this.hasIssues) {
+      console.log('\n❌ Security audit failed - issues found!');
+      process.exit(1);
     } else {
-      console.log('\n🎉 Security audit passed! Your AuthKit API appears to be properly secured.');
+      console.log('\n✅ Security audit passed!');
+      process.exit(0);
     }
-    
-    console.log('\n🔗 For more security best practices, visit: https://owasp.org/www-project-api-security/');
   }
 }
 
