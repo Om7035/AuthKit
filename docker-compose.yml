@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:15
     container_name: authkit_postgres
     restart: unless-stopped
     environment:
@@ -20,17 +20,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - authkit_network
 
-  # AuthKit API Server
-  api:
-    build: 
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: authkit_api
+  # AuthKit Backend API Server
+  backend:
+    image: node:18
+    container_name: authkit_backend
     restart: unless-stopped
+    working_dir: /app
+    command: npm run dev
     ports:
-      - "3000:3000"
+      - "5000:3000"
     environment:
+      # ⚠️ CRITICAL WARNING ⚠️
+      COMPOSE_ENV: "DEMO MODE: Credentials are hardcoded for demo only"
+      
       # Database Configuration
       DB_HOST: postgres
       DB_PORT: 5432
@@ -39,10 +44,14 @@ services:
       DB_PASSWORD: authkit_password
       
       # JWT Configuration
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
-      JWT_REFRESH_SECRET: your-super-secret-refresh-key-change-in-production
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production-min-32-chars
+      JWT_REFRESH_SECRET: your-super-secret-refresh-key-change-in-production-min-32
       JWT_EXPIRES_IN: 15m
+      JWT_EXPIRATION: 900
       JWT_REFRESH_EXPIRES_IN: 7d
+      
+      # Cookie Security
+      COOKIE_SECRET: your-super-secret-cookie-key-change-in-production-min-32-chars
       
       # Server Configuration
       NODE_ENV: development
@@ -53,10 +62,10 @@ services:
       # Replace with real Google OAuth credentials in production
       GOOGLE_CLIENT_ID: AUTHKIT_DEMO_CLIENT_ID
       GOOGLE_CLIENT_SECRET: AUTHKIT_DEMO_SECRET
-      GOOGLE_REDIRECT_URI: http://localhost:3000/api/auth/google/callback
+      GOOGLE_REDIRECT_URI: http://localhost:5000/api/auth/google/callback
       
       # CORS Configuration
-      CORS_ORIGIN: http://localhost:3001
+      CORS_ORIGIN: http://localhost:3000
       
       # Rate Limiting
       RATE_LIMIT_WINDOW_MS: 900000
@@ -66,14 +75,51 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ./backend:/app/backend
-      - ./scripts:/app/scripts
+      - ./:/app
       - /app/node_modules
+      - /app/frontend/node_modules
+    networks:
+      - authkit_network
+
+  # AuthKit Frontend (React)
+  frontend:
+    image: node:18
+    container_name: authkit_frontend
+    restart: unless-stopped
+    working_dir: /app/frontend
+    command: npm start
+    ports:
+      - "3000:3000"
+    environment:
+      # Demo Login Credentials (pre-configured)
+      REACT_APP_DEMO_EMAIL: demo@authkit.com
+      REACT_APP_DEMO_PASSWORD: password
+      
+      # API Configuration
+      REACT_APP_API_URL: http://localhost:5000
+      
+      # Demo Mode Warning
+      REACT_APP_DEMO_MODE: "true"
+      REACT_APP_WARNING: "DEMO MODE: Using hardcoded credentials for testing only"
+      
+      # Development Settings
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+      
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/frontend/node_modules
+    networks:
+      - authkit_network
+    stdin_open: true
+    tty: true
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  default:
-    name: authkit_network
+  authkit_network:
+    driver: bridge
