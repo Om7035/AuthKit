@@ -3,6 +3,11 @@ const Joi = require('joi');
 const User = require('../models/User');
 const JWTUtils = require('../utils/jwt');
 const { authenticateToken } = require('../middleware/auth');
+const { 
+  validateRefreshTokenWithXSSDetection, 
+  setSecureRefreshTokenCookie, 
+  clearRefreshTokenCookie 
+} = require('../middleware/cookieAuth');
 
 const router = express.Router();
 
@@ -39,18 +44,7 @@ const loginSchema = Joi.object({
   })
 });
 
-// Helper function to set refresh token cookie
-const setRefreshTokenCookie = (res, refreshToken) => {
-  const expirationMs = JWTUtils.getTokenExpirationSeconds('refresh') * 1000;
-  
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: expirationMs,
-    path: '/api/auth'
-  });
-};
+// Note: setRefreshTokenCookie is now imported from cookieAuth middleware
 
 // POST /api/auth/register - Register new user
 router.post('/register', async (req, res) => {
@@ -105,7 +99,7 @@ router.post('/register', async (req, res) => {
     );
 
     // Set httpOnly cookie for refresh token
-    setRefreshTokenCookie(res, refreshToken);
+    setSecureRefreshTokenCookie(res, refreshToken);
 
     // Update last login
     await user.updateLastLogin();
@@ -186,7 +180,7 @@ router.post('/login', async (req, res) => {
     );
 
     // Set httpOnly cookie for refresh token
-    setRefreshTokenCookie(res, refreshToken);
+    setSecureRefreshTokenCookie(res, refreshToken);
 
     // Update last login
     await user.updateLastLogin();
@@ -212,59 +206,24 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/refresh - Refresh access token using httpOnly cookie
-router.post('/refresh', async (req, res) => {
+// POST /api/auth/refresh - Refresh access token using httpOnly cookie with XSS detection
+router.post('/refresh', validateRefreshTokenWithXSSDetection, async (req, res) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
-      return res.status(401).json({
-        success: false,
-        error: 'Refresh token not found',
-        code: 'REFRESH_TOKEN_MISSING'
-      });
-    }
-
-    // Verify refresh token
-    let decoded;
-    try {
-      decoded = JWTUtils.verifyRefreshToken(refreshToken);
-    } catch (err) {
-      // Clear invalid cookie
-      res.clearCookie('refreshToken', { path: '/api/auth' });
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid refresh token',
-        code: 'REFRESH_TOKEN_INVALID'
-      });
-    }
-
-    // Check if refresh token exists in database
-    const refreshTokenHash = JWTUtils.hashToken(refreshToken);
-    const tokenData = await User.findValidRefreshToken(refreshTokenHash);
-
-    if (!tokenData) {
-      // Clear invalid cookie
-      res.clearCookie('refreshToken', { path: '/api/auth' });
-      return res.status(401).json({
-        success: false,
-        error: 'Refresh token not found or expired',
-        code: 'REFRESH_TOKEN_NOT_FOUND'
-      });
-    }
-
-    const { user } = tokenData;
+    // User and token data are already validated by middleware
+    const { user } = req;
+    const refreshToken = req.refreshToken;
 
     // Generate new access token
     const newAccessToken = JWTUtils.generateAccessToken(user);
 
-    // Optionally rotate refresh token (recommended for security)
+    // Rotate refresh token for enhanced security
     const newRefreshToken = JWTUtils.generateRefreshToken(user);
     const newRefreshTokenHash = JWTUtils.hashToken(newRefreshToken);
     const newRefreshExpiresAt = new Date(Date.now() + JWTUtils.getTokenExpirationSeconds('refresh') * 1000);
 
     // Revoke old refresh token and create new one
-    await User.revokeRefreshToken(refreshTokenHash);
+    const oldRefreshTokenHash = JWTUtils.hashToken(refreshToken);
+    await User.revokeRefreshToken(oldRefreshTokenHash);
     await user.createRefreshToken(
       newRefreshTokenHash,
       newRefreshExpiresAt,
@@ -272,8 +231,11 @@ router.post('/refresh', async (req, res) => {
       req.ip
     );
 
-    // Set new refresh token cookie
-    setRefreshTokenCookie(res, newRefreshToken);
+    // Set new refresh token cookie with enhanced security
+    setSecureRefreshTokenCookie(res, newRefreshToken);
+
+    // Log successful token refresh for security monitoring
+    console.log(`[SECURITY] Token refreshed successfully for user ${user.email} from IP: ${req.ip}`);
 
     res.json({
       success: true,
@@ -306,8 +268,8 @@ router.post('/logout', authenticateToken, async (req, res) => {
       await User.revokeRefreshToken(refreshTokenHash);
     }
 
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken', { path: '/api/auth' });
+    // Clear refresh token cookie securely
+    clearRefreshTokenCookie(res);
 
     res.json({
       success: true,
@@ -331,8 +293,8 @@ router.post('/logout-all', authenticateToken, async (req, res) => {
     // Revoke all refresh tokens for the user
     await req.user.revokeAllRefreshTokens();
 
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken', { path: '/api/auth' });
+    // Clear refresh token cookie securely
+    clearRefreshTokenCookie(res);
 
     res.json({
       success: true,

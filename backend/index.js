@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const { testConnection } = require('./config/database');
 const { blockUnauthenticatedApi } = require('./middleware/auth');
+const { apiRefreshTokenGuard } = require('./middleware/cookieAuth');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -68,6 +69,20 @@ if (process.env.NODE_ENV === 'development') {
 
 // Security middleware: Block unauthenticated access to /api/ routes
 app.use(blockUnauthenticatedApi);
+
+// Enhanced security: Require refresh token cookie for API routes
+app.use('/api', (req, res, next) => {
+  if (req.url.startsWith('/api/')) {
+    if (!req.cookies.refreshToken) {
+      console.log(`[SECURITY] API access denied - missing refresh token cookie. Path: ${req.path}, IP: ${req.ip}`);
+      return res.status(401).send("Missing auth");
+    }
+  }
+  next();
+});
+
+// Additional API refresh token guard
+app.use(apiRefreshTokenGuard);
 
 // Health check endpoint (public)
 app.get('/health', (req, res) => {

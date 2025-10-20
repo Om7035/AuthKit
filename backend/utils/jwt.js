@@ -12,11 +12,16 @@ class JWTUtils {
       type: 'access'
     };
 
+    // Use JWT_EXPIRATION in seconds if provided, otherwise default to 15 minutes
+    const expiresIn = process.env.JWT_EXPIRATION 
+      ? parseInt(process.env.JWT_EXPIRATION) 
+      : process.env.JWT_EXPIRES_IN || '15m';
+
     return jwt.sign(
       payload,
       process.env.JWT_SECRET,
       { 
-        expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+        expiresIn: expiresIn,
         issuer: 'authkit',
         audience: 'authkit-api'
       }
