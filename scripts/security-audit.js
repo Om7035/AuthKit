@@ -31,15 +31,29 @@ class SecurityAudit {
     console.log('🔍 Checking httpOnly cookie configuration...');
     
     try {
+      // Check both auth routes and cookie middleware
       const authRoutesPath = path.join(__dirname, '../backend/routes/auth.js');
-      const authRoutesContent = fs.readFileSync(authRoutesPath, 'utf8');
+      const cookieAuthPath = path.join(__dirname, '../backend/middleware/cookieAuth.js');
+      
+      let authRoutesContent = '';
+      let cookieAuthContent = '';
+      
+      if (fs.existsSync(authRoutesPath)) {
+        authRoutesContent = fs.readFileSync(authRoutesPath, 'utf8');
+      }
+      
+      if (fs.existsSync(cookieAuthPath)) {
+        cookieAuthContent = fs.readFileSync(cookieAuthPath, 'utf8');
+      }
+      
+      const combinedContent = authRoutesContent + cookieAuthContent;
       
       // Check for httpOnly: true in cookie configuration
       const httpOnlyRegex = /httpOnly:\s*true/gi;
-      const cookieRegex = /\.cookie\s*\(/gi;
+      const cookieRegex = /\.cookie\s*\(|setSecureRefreshTokenCookie/gi;
       
-      const hasHttpOnly = httpOnlyRegex.test(authRoutesContent);
-      const hasCookie = cookieRegex.test(authRoutesContent);
+      const hasHttpOnly = httpOnlyRegex.test(combinedContent);
+      const hasCookie = cookieRegex.test(combinedContent);
       
       if (hasCookie && hasHttpOnly) {
         this.addIssue(
