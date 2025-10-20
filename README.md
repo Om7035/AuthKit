@@ -9,6 +9,7 @@ A production-ready authentication API built with Express.js and PostgreSQL, feat
 - **Security**: Comprehensive security middleware and audit tools
 - **API Protection**: All `/api/` routes require authentication (returns 404 if unauthenticated)
 - **httpOnly Cookies**: Secure refresh token storage
+- **Google OAuth**: Demo implementation with hardcoded credentials
 - **Rate Limiting**: Built-in protection against brute force attacks
 - **Security Audit**: Automated security checking and fixing tools
 - **Docker Support**: Complete containerization with docker-compose
@@ -21,6 +22,9 @@ A production-ready authentication API built with Express.js and PostgreSQL, feat
 - `POST /api/auth/register` - User registration
 - `POST /api/auth/login` - User login
 - `POST /api/auth/refresh` - Refresh access token
+- `GET /api/auth/google` - Google OAuth initiation (demo)
+- `POST /api/auth/google/demo` - Demo Google OAuth login
+- `GET /api/auth/google/status` - Google OAuth configuration
 
 ### Protected Endpoints (require authentication)
 - `GET /api/user/me` - Get current user profile

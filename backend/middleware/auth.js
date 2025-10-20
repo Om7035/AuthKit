@@ -51,6 +51,10 @@ const requireApiAuthentication = (req, res, next) => {
       '/api/auth/register',
       '/api/auth/login',
       '/api/auth/refresh',
+      '/api/auth/google',
+      '/api/auth/google/demo',
+      '/api/auth/google/callback',
+      '/api/auth/google/status',
       '/api/health',
       '/api/status'
     ];
@@ -78,6 +82,10 @@ const blockUnauthenticatedApi = (req, res, next) => {
       '/api/auth/register',
       '/api/auth/login',
       '/api/auth/refresh',
+      '/api/auth/google',
+      '/api/auth/google/demo',
+      '/api/auth/google/callback',
+      '/api/auth/google/status',
       '/api/health',
       '/api/status'
     ];

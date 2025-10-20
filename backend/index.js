@@ -11,6 +11,7 @@ const { apiRefreshTokenGuard } = require('./middleware/cookieAuth');
 // Import routes
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
+const googleAuthRoutes = require('./auth/google');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -73,7 +74,19 @@ app.use(blockUnauthenticatedApi);
 // Enhanced security: Require refresh token cookie for API routes
 app.use('/api', (req, res, next) => {
   if (req.url.startsWith('/api/')) {
-    if (!req.cookies.refreshToken) {
+    // Allow Google OAuth endpoints to be public
+    const publicGoogleEndpoints = [
+      '/api/auth/google',
+      '/api/auth/google/demo',
+      '/api/auth/google/callback',
+      '/api/auth/google/status'
+    ];
+    
+    const isPublicGoogleEndpoint = publicGoogleEndpoints.some(endpoint => 
+      req.path === endpoint || req.path.startsWith(endpoint + '/')
+    );
+    
+    if (!isPublicGoogleEndpoint && !req.cookies.refreshToken) {
       console.log(`[SECURITY] API access denied - missing refresh token cookie. Path: ${req.path}, IP: ${req.ip}`);
       return res.status(401).send("Missing auth");
     }
@@ -107,6 +120,7 @@ app.get('/api/status', (req, res) => {
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/google', googleAuthRoutes);
 app.use('/api/user', userRoutes);
 
 // 404 handler for API routes

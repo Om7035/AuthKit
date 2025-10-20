@@ -50,6 +50,10 @@ const apiRefreshTokenGuard = (req, res, next) => {
     const publicEndpoints = [
       '/api/auth/register',
       '/api/auth/login',
+      '/api/auth/google',
+      '/api/auth/google/demo',
+      '/api/auth/google/callback',
+      '/api/auth/google/status',
       '/api/health',
       '/api/status'
     ];
