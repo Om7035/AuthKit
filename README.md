@@ -97,16 +97,26 @@ docker-compose up -d
 
 <div align="center">
 
-### 🌟 **Live Demo** 
-**No installation required!**
+### 🌟 **The Demo IS the Application!** 
+**No separate demo files - the running app IS your demo**
 
-**👆 [Click here to try the live demo](http://localhost:3000)** *(after running docker-compose)*
+```bash
+docker-compose up -d
+# 🎉 Demo ready at: http://localhost:3000
+```
 
 **Demo Credentials:**
 ```
 📧 Email: demo@authkit.com
 🔒 Password: password
 ```
+
+**What You Get:**
+- ✅ **Full React Frontend** with demo banner
+- ✅ **Working Authentication** with demo user
+- ✅ **Google OAuth Demo** (hardcoded for testing)
+- ✅ **Security Audit** (`npm run audit`)
+- ✅ **API Endpoints** ready to test
 
 </div>  
 
