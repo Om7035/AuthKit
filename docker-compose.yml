@@ -27,7 +27,7 @@ services:
     container_name: authkit_backend
     restart: unless-stopped
     working_dir: /app
-    command: npm run dev
+    command: sh -c "npm install && npm run dev"
     ports:
       - "5000:3000"
     environment:
@@ -85,7 +85,7 @@ services:
     container_name: authkit_frontend
     restart: unless-stopped
     working_dir: /app/frontend
-    command: npm start
+    command: sh -c "npm install && npm start"
     ports:
       - "3000:3000"
     environment:
